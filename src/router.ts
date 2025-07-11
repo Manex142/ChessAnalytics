@@ -1,4 +1,5 @@
 import {FastifyInstance} from "fastify";
+import * as repl from "node:repl";
 
 
 const getUserOpts = {
@@ -28,6 +29,14 @@ const getUserOpts = {
                 additionalProperties: false
             },
             400: {
+                type: 'object',
+                properties: {
+                    error: { type: 'string' }
+                },
+                required: ['error'],
+                additionalProperties: false
+            },
+            404: {
                 type: 'object',
                 properties: {
                     error: { type: 'string' }
@@ -89,6 +98,65 @@ const getEnrichedUserOpts = {
                 required: ['error'],
                 additionalProperties: false
             },
+            404: {
+                type: 'object',
+                properties: {
+                    error: { type: 'string' }
+                },
+                required: ['error'],
+                additionalProperties: false
+            }
+        }
+    }
+}
+
+const getTopPlayerHistoryOpts = {
+    schema: {
+        querystring: {
+            type: 'object',
+            properties: {
+                mode: { 'type': 'string', 'minLength': 1 },
+                top: {
+                    'type': 'integer',
+                    minimum: 1,
+                    maximum: 200
+                },
+            },
+            required: ['mode', 'top']
+        },
+        response: {
+            200: {
+                type: 'object',
+                properties: {
+                    username: { type: 'string' },
+                    history: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                date: { type: 'string', format: 'date-time' },
+                                rating: { type: 'integer' }
+                            }
+                        }
+                    }
+                }
+            },
+            400: {
+                type: 'object',
+                properties: {
+                    error: { type: 'string' }
+                },
+                required: ['error'],
+                additionalProperties: false
+            },
+            404: {
+                type: 'object',
+                properties: {
+                    error: { type: 'string' }
+                },
+                required: ['error'],
+                additionalProperties: false
+            }
         }
     }
 }
@@ -109,6 +177,10 @@ export default function router(fastify: FastifyInstance, options: any, done: () 
                     error: 'Invalid or missing \'id\' parameter.'
                 });
             } else if (request.routeOptions.url === '/chess/user/enriched') {
+                reply.status(400).send({
+                    error: 'Invalid or missing \'id\' or \'mode\' parameter.'
+                });
+            } else if (request.routeOptions.url === '/chess/topPlayerHistory') {
                 reply.status(400).send({
                     error: 'Invalid or missing \'id\' or \'mode\' parameter.'
                 });
@@ -181,6 +253,48 @@ export default function router(fastify: FastifyInstance, options: any, done: () 
             }
         }
 
+        reply.send(response);
+    });
+
+    fastify.get("/chess/topPlayerHistory", getTopPlayerHistoryOpts, async (request, reply) => {
+        enum GameMode {
+            Bullet = "bullet",
+            Blitz = "blitz",
+            Rapid = "rapid",
+            Classical = "classical",
+            Correspondence = "correspondence",
+            Chess960 = "chess960",
+            KingOfTheHill = "king of the hill",
+            ThreeCheck = "three-check",
+            Antichess = "antichess",
+            Atomic = "atomic",
+            Horde = "horde",
+            RacingKings = "racing kings",
+            Crazyhouse = "crazyhouse",
+            Puzzles = "puzzles",
+            UltraBullet = "ultrabullet"
+        }
+
+        let { mode, top } = request.query as { mode: string, top: number };
+        if (!Object.values(GameMode).includes(mode as GameMode)) {
+            reply.status(404).send({ error: `Game Mode not found.` });
+            return;
+        }
+        let result = await fetch(`https://lichess.org/api/player/top/${top}/${mode}`);
+        let topData = await result.json();
+        let username = topData.users[0].username;
+        result = await fetch(`https://lichess.org/api/user/${username}/rating-history`);
+        let historyData = await result.json();
+        let modeHistory = historyData.find((item: any) => item.name.toLowerCase() === mode);
+
+        let response = {
+            username,
+            history: modeHistory.points.map((item: any) => ({
+                date: new Date(item[0], item[1], item[2]).toISOString().split('T')[0],
+                rating: item[3]
+            }))
+        }
+        fastify.log.info(response);
         reply.send(response);
     });
 
